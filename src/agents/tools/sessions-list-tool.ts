@@ -226,17 +226,21 @@ export function createSessionsListTool(opts?: {
         rows.push(row);
       }
 
-      if (messageLimit > 0 && historyTargets.length > 0) {
-        const maxConcurrent = Math.min(4, historyTargets.length);
+      // Cap history fetches to prevent N+1 WS storms on large session lists
+      const maxHistoryFetches = 50;
+      const cappedTargets = historyTargets.slice(0, maxHistoryFetches);
+
+      if (messageLimit > 0 && cappedTargets.length > 0) {
+        const maxConcurrent = Math.min(4, cappedTargets.length);
         let index = 0;
         const worker = async () => {
           while (true) {
             const next = index;
             index += 1;
-            if (next >= historyTargets.length) {
+            if (next >= cappedTargets.length) {
               return;
             }
-            const target = historyTargets[next];
+            const target = cappedTargets[next];
             const history = await callGateway<{ messages: Array<unknown> }>({
               method: "chat.history",
               params: { sessionKey: target.resolvedKey, limit: messageLimit },
