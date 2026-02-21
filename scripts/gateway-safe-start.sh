@@ -14,7 +14,7 @@ CRASH_LOG="/tmp/openclaw-crash-times"
 MAX_CRASHES=3
 CRASH_WINDOW=30  # seconds
 LOCKFILE="/tmp/openclaw-fallback-active"
-PORT="${CLAWDBOT_GATEWAY_PORT:-18789}"
+PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
 
 log() { echo "[$(date '+%H:%M:%S')] $*" >&2; }
 
