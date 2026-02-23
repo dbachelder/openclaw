@@ -32,7 +32,7 @@ import { buildPairingReply } from "../../../pairing/pairing-messages.js";
 import { upsertChannelPairingRequest } from "../../../pairing/pairing-store.js";
 import { resolveAgentRoute } from "../../../routing/resolve-route.js";
 import { resolveThreadSessionKeys } from "../../../routing/session-key.js";
-import type { ResolvedSlackAccount } from "../../accounts.js";
+import { resolveSlackReplyToMode, type ResolvedSlackAccount } from "../../accounts.js";
 import { reactSlackMessage } from "../../actions.js";
 import { sendMessageSlack } from "../../send.js";
 import { resolveSlackThreadContext } from "../../threading.js";
@@ -200,7 +200,9 @@ export async function prepareSlackMessage(params: {
   });
 
   const baseSessionKey = route.sessionKey;
-  const threadContext = resolveSlackThreadContext({ message, replyToMode: ctx.replyToMode });
+  const chatType = isDirectMessage ? "direct" : isGroupDm ? "group" : "channel";
+  const replyToMode = resolveSlackReplyToMode(account, chatType);
+  const threadContext = resolveSlackThreadContext({ message, replyToMode });
   const threadTs = threadContext.incomingThreadTs;
   const isThreadReply = threadContext.isThreadReply;
   const threadKeys = resolveThreadSessionKeys({
@@ -678,6 +680,7 @@ export async function prepareSlackMessage(params: {
     channelConfig,
     replyTarget,
     ctxPayload,
+    replyToMode,
     isDirectMessage,
     isRoomish,
     historyKey,
