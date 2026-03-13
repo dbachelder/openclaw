@@ -115,14 +115,14 @@ Common tags:
 
 ### Base image metadata
 
-The main Docker image currently uses:
+The main Docker image currently uses a multi-stage build with this runtime base image:
 
-- `node:22-bookworm`
+- `node:22-bookworm-slim`
 
 The docker image now publishes OCI base-image annotations (sha256 is an example):
 
-- `org.opencontainers.image.base.name=docker.io/library/node:22-bookworm`
-- `org.opencontainers.image.base.digest=sha256:cd7bcd2e7a1e6f72052feb023c7f6b722205d3fcab7bbcbd2d1bfdab10b1e935`
+- `org.opencontainers.image.base.name=docker.io/library/node:22-bookworm-slim`
+- `org.opencontainers.image.base.digest=sha256:9c2c405e3ff9b9afb2873232d24bb06367d649aa3e6259cbe314da59578e81e9`
 - `org.opencontainers.image.source=https://github.com/openclaw/openclaw`
 - `org.opencontainers.image.url=https://openclaw.ai`
 - `org.opencontainers.image.documentation=https://docs.openclaw.ai/install/docker`
