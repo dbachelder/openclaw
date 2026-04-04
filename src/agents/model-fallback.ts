@@ -601,7 +601,7 @@ function resolveFallbackCandidates(params: {
 }
 
 const lastProbeAttempt = new Map<string, number>();
-const MIN_PROBE_INTERVAL_MS = 30_000; // 30 seconds between probes per key
+const MIN_PROBE_INTERVAL_MS = 30 * 60_000; // 30 minutes between probes per key
 const PROBE_MARGIN_MS = 2 * 60 * 1000;
 const PROBE_SCOPE_DELIMITER = "::";
 const PROBE_STATE_TTL_MS = 24 * 60 * 60 * 1000;

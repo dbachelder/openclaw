@@ -654,7 +654,7 @@ describe("markAuthProfileUsed", () => {
 
 describe("markAuthProfileFailure — active windows do not extend on retry", () => {
   // Regression for https://github.com/openclaw/openclaw/issues/23516
-  // When all providers are at saturation backoff (60 min) and retries fire every 30 min,
+  // When all providers are at saturation backoff (30 min) and retries fire every 30 min,
   // each retry was resetting cooldownUntil to now+60m, preventing recovery.
   type WindowStats = ProfileUsageStats;
 
@@ -744,8 +744,8 @@ describe("markAuthProfileFailure — active windows do not extend on retry", () 
         errorCount: 3,
         lastFailureAt: now - 60_000,
       }),
-      // errorCount resets → calculateAuthProfileCooldownMs(1) = 30_000 (stepped: 30s → 1m → 5m)
-      expectedUntil: (now: number) => now + 30_000,
+      // errorCount resets → calculateAuthProfileCooldownMs(1) = 30 min
+      expectedUntil: (now: number) => now + 30 * 60_000,
       readUntil: (stats: WindowStats | undefined) => stats?.cooldownUntil,
     },
     {

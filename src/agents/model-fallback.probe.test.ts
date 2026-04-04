@@ -495,14 +495,14 @@ describe("runWithModelFallback – probe logic", () => {
     expect(run).toHaveBeenNthCalledWith(3, "deepseek", "deepseek-chat");
   });
 
-  it("throttles probe when called within 30s interval", async () => {
+  it("throttles probe when called within 30m interval", async () => {
     const cfg = makeCfg();
     // Cooldown just about to expire (within probe margin)
     const almostExpired = NOW + 30 * 1000;
     mockedGetSoonestCooldownExpiry.mockReturnValue(almostExpired);
 
-    // Simulate a recent probe 10s ago
-    _probeThrottleInternals.lastProbeAttempt.set("openai", NOW - 10_000);
+    // Simulate a recent probe 10 minutes ago
+    _probeThrottleInternals.lastProbeAttempt.set("openai", NOW - 10 * 60_000);
 
     const run = vi.fn().mockResolvedValue("ok");
 
@@ -512,13 +512,13 @@ describe("runWithModelFallback – probe logic", () => {
     expectFallbackUsed(result, run);
   });
 
-  it("allows probe when 30s have passed since last probe", async () => {
+  it("allows probe when 30m have passed since last probe", async () => {
     const cfg = makeCfg();
     const almostExpired = NOW + 30 * 1000;
     mockedGetSoonestCooldownExpiry.mockReturnValue(almostExpired);
 
-    // Last probe was 31s ago — should NOT be throttled
-    _probeThrottleInternals.lastProbeAttempt.set("openai", NOW - 31_000);
+    // Last probe was 31 minutes ago — should NOT be throttled
+    _probeThrottleInternals.lastProbeAttempt.set("openai", NOW - 31 * 60_000);
 
     const run = vi.fn().mockResolvedValue("probed-ok");
 
