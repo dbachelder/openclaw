@@ -77,6 +77,7 @@ export type {
 } from "./auth-profiles/types.js";
 export {
   calculateAuthProfileCooldownMs,
+  claimAuthProfile,
   clearAuthProfileCooldown,
   clearExpiredCooldowns,
   getSoonestCooldownExpiry,
