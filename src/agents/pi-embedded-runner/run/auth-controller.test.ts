@@ -6,6 +6,7 @@ import type { RuntimeAuthState } from "./helpers.js";
 const mocks = vi.hoisted(() => ({
   prepareProviderRuntimeAuth: vi.fn(),
   getApiKeyForModel: vi.fn(),
+  claimAuthProfile: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../../../plugins/provider-runtime.js", async () => {
@@ -23,6 +24,19 @@ vi.mock("../../model-auth.js", async () => {
   return {
     ...actual,
     getApiKeyForModel: mocks.getApiKeyForModel,
+  };
+});
+
+// auth-controller calls claimAuthProfile after each profile selection to
+// bump `lastUsed` for round-robin. The unit-fast project disables module
+// isolation, so the real `./store.js` filesystem-lock path can leak across
+// test files. Stub it here to keep these tests deterministic.
+vi.mock("../../auth-profiles.js", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../auth-profiles.js")>("../../auth-profiles.js");
+  return {
+    ...actual,
+    claimAuthProfile: mocks.claimAuthProfile,
   };
 });
 
@@ -145,6 +159,8 @@ describe("createEmbeddedRunAuthController", () => {
   beforeEach(() => {
     mocks.prepareProviderRuntimeAuth.mockReset();
     mocks.getApiKeyForModel.mockReset();
+    mocks.claimAuthProfile.mockReset();
+    mocks.claimAuthProfile.mockResolvedValue(undefined);
   });
 
   it("applies runtime request overrides on the first auth exchange", async () => {
@@ -195,6 +211,14 @@ describe("createEmbeddedRunAuthController", () => {
       sourceApiKey: "source-api-key",
       authMode: "api-key",
       profileId: "default",
+    });
+    // Round-robin claim: lastUsed must be bumped the moment a profile is
+    // selected, so a concurrent run starting milliseconds later rotates to
+    // the next profile in the candidate list.
+    expect(mocks.claimAuthProfile).toHaveBeenCalledWith({
+      store: expect.objectContaining({ version: 1 }),
+      profileId: "default",
+      agentDir: "/tmp/agent",
     });
   });
 

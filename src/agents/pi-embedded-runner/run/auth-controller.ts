@@ -4,6 +4,7 @@ import { formatErrorMessage } from "../../../infra/errors.js";
 import { prepareProviderRuntimeAuth } from "../../../plugins/provider-runtime.js";
 import {
   type AuthProfileStore,
+  claimAuthProfile,
   isProfileInCooldown,
   resolveProfilesUnavailableReason,
 } from "../../auth-profiles.js";
@@ -358,6 +359,32 @@ export function createEmbeddedRunAuthController(params: {
     });
   };
 
+  // Bump `lastUsed` the moment a profile is claimed by this run, so a
+  // concurrent run starting a few ms later rotates to the next profile
+  // instead of seeing the same "oldest" entry. Fire-and-await: the disk
+  // write must complete before we return control to the caller (which is
+  // about to make the first API call with this profile). Errors are
+  // logged but non-fatal — the claim is a rotation hint, not correctness.
+  const claimProfileForRun = async (profileId: string | undefined): Promise<void> => {
+    if (!profileId || profileId.length === 0) {
+      return;
+    }
+    try {
+      await claimAuthProfile({
+        store: params.authStore,
+        profileId,
+        agentDir: params.agentDir,
+      });
+    } catch (error) {
+      params.log.warn(`claimAuthProfile failed for ${profileId}: ${formatErrorMessage(error)}`);
+    }
+  };
+
+  const commitProfileSelection = async (profileId: string | undefined): Promise<void> => {
+    params.setLastProfileId(profileId);
+    await claimProfileForRun(profileId);
+  };
+
   const applyApiKeyInfo = async (candidate?: string): Promise<void> => {
     const apiKeyInfo = await resolveApiKeyForCandidate(candidate);
     params.setApiKeyInfo(apiKeyInfo);
@@ -399,7 +426,7 @@ export function createEmbeddedRunAuthController(params: {
           if (preparedAuth.expiresAt) {
             scheduleRuntimeAuthRefresh();
           }
-          params.setLastProfileId(resolvedProfileId);
+          await commitProfileSelection(resolvedProfileId);
           return;
         }
       } catch (error) {
@@ -413,7 +440,7 @@ export function createEmbeddedRunAuthController(params: {
       clearRuntimeAuthRefreshTimer();
       params.authStorage.setRuntimeApiKey(runtimeModel.provider, AWS_SDK_AUTH_SENTINEL);
       params.setRuntimeAuthState(null);
-      params.setLastProfileId(resolvedProfileId);
+      await commitProfileSelection(resolvedProfileId);
       return;
     }
     let runtimeAuthHandled = false;
@@ -445,7 +472,7 @@ export function createEmbeddedRunAuthController(params: {
       params.authStorage.setRuntimeApiKey(runtimeModel.provider, apiKeyInfo.apiKey);
       params.setRuntimeAuthState(null);
     }
-    params.setLastProfileId(apiKeyInfo.profileId);
+    await commitProfileSelection(apiKeyInfo.profileId);
   };
 
   const advanceAuthProfile = async (): Promise<boolean> => {

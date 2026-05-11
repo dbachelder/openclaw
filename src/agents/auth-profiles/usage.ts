@@ -325,6 +325,53 @@ export function resolveProfilesUnavailableReason(params: {
 }
 
 /**
+ * Claim a profile at selection time. Updates `lastUsed` only; does NOT reset
+ * error count, clear cooldown, or change any other field. The purpose is to
+ * bump the rotation tiebreaker the moment a run picks a profile, so that a
+ * concurrent run starting milliseconds later sees that profile as freshly
+ * used and rotates to the next one.
+ *
+ * This is the round-robin claim primitive. End-of-run success bookkeeping
+ * (errorCount reset, cooldown clear) still goes through `markAuthProfileUsed`.
+ *
+ * Uses the store lock for race-free concurrent writes.
+ */
+export async function claimAuthProfile(params: {
+  store: AuthProfileStore;
+  profileId: string;
+  agentDir?: string;
+}): Promise<void> {
+  const { store, profileId, agentDir } = params;
+  const updated = await authProfileUsageDeps.updateAuthProfileStoreWithLock({
+    agentDir,
+    updater: (freshStore) => {
+      if (!freshStore.profiles[profileId]) {
+        return false;
+      }
+      const now = Date.now();
+      updateUsageStatsEntry(freshStore, profileId, (existing) => ({
+        ...existing,
+        lastUsed: now,
+      }));
+      return true;
+    },
+  });
+  if (updated) {
+    store.usageStats = updated.usageStats;
+    return;
+  }
+  if (!store.profiles[profileId]) {
+    return;
+  }
+  const now = Date.now();
+  updateUsageStatsEntry(store, profileId, (existing) => ({
+    ...existing,
+    lastUsed: now,
+  }));
+  authProfileUsageDeps.saveAuthProfileStore(store, agentDir);
+}
+
+/**
  * Mark a profile as successfully used. Resets error count and updates lastUsed.
  * Uses store lock to avoid overwriting concurrent usage updates.
  */

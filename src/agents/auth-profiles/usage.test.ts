@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthProfileStore, ProfileUsageStats } from "./types.js";
 import {
   __testing as authProfileUsageTesting,
+  claimAuthProfile,
   clearAuthProfileCooldown,
   clearExpiredCooldowns,
   isProfileInCooldown,
@@ -652,6 +653,95 @@ describe("markAuthProfileUsed", () => {
   });
 });
 
+describe("claimAuthProfile", () => {
+  it("updates lastUsed but does NOT reset errorCount or clear cooldown", async () => {
+    const cooldownUntil = Date.now() + 60_000;
+    const store = makeStore({
+      "anthropic:default": {
+        errorCount: 3,
+        cooldownUntil,
+        cooldownReason: "rate_limit",
+        failureCounts: { rate_limit: 3 },
+        lastFailureAt: Date.now() - 5_000,
+      },
+    });
+
+    storeMocks.updateAuthProfileStoreWithLock.mockResolvedValue(null);
+
+    await claimAuthProfile({
+      store,
+      profileId: "anthropic:default",
+      agentDir: "/tmp/openclaw-auth-profiles-claim",
+    });
+
+    expect(storeMocks.saveAuthProfileStore).toHaveBeenCalledWith(
+      store,
+      "/tmp/openclaw-auth-profiles-claim",
+    );
+    const stats = store.usageStats?.["anthropic:default"];
+    // lastUsed bumped
+    expect(stats?.lastUsed).toEqual(expect.any(Number));
+    expect(stats?.lastUsed).toBeGreaterThan(Date.now() - 1_000);
+    // error state preserved — claim is a rotation hint, not a success signal
+    expect(stats?.errorCount).toBe(3);
+    expect(stats?.cooldownUntil).toBe(cooldownUntil);
+    expect(stats?.cooldownReason).toBe("rate_limit");
+    expect(stats?.failureCounts).toEqual({ rate_limit: 3 });
+  });
+
+  it("is a no-op for unknown profile id", async () => {
+    const store = makeStore({});
+    storeMocks.updateAuthProfileStoreWithLock.mockResolvedValue(null);
+    await claimAuthProfile({
+      store,
+      profileId: "does-not-exist:nope",
+      agentDir: "/tmp/openclaw-auth-profiles-claim",
+    });
+    expect(storeMocks.saveAuthProfileStore).not.toHaveBeenCalled();
+  });
+
+  it("adopts locked store usage stats when lock update succeeds", async () => {
+    const store = makeStore({});
+    const lockedStore = makeStore({
+      "anthropic:default": { lastUsed: 987_654, errorCount: 2 },
+    });
+    storeMocks.updateAuthProfileStoreWithLock.mockResolvedValue(lockedStore);
+
+    await claimAuthProfile({
+      store,
+      profileId: "anthropic:default",
+      agentDir: "/tmp/openclaw-auth-profiles-claim",
+    });
+
+    expect(storeMocks.saveAuthProfileStore).not.toHaveBeenCalled();
+    expect(store.usageStats).toEqual(lockedStore.usageStats);
+  });
+
+  it("two sequential claims of different profiles update lastUsed in order — enabling round-robin", async () => {
+    // Simulates two concurrent sessions: first session claims openai-codex:default,
+    // second session would then see anthropic:default as the older entry.
+    const store = makeStore({
+      "anthropic:default": { lastUsed: 1_000, errorCount: 0 },
+      "openai-codex:default": { lastUsed: 1_000, errorCount: 0 },
+    });
+    storeMocks.updateAuthProfileStoreWithLock.mockResolvedValue(null);
+
+    const before = Date.now();
+    await claimAuthProfile({ store, profileId: "openai-codex:default" });
+    const afterFirst = Date.now();
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    await claimAuthProfile({ store, profileId: "anthropic:default" });
+    const afterSecond = Date.now();
+
+    const codex = store.usageStats?.["openai-codex:default"]?.lastUsed ?? 0;
+    const anthropic = store.usageStats?.["anthropic:default"]?.lastUsed ?? 0;
+    expect(codex).toBeGreaterThanOrEqual(before);
+    expect(codex).toBeLessThanOrEqual(afterFirst);
+    expect(anthropic).toBeGreaterThan(codex);
+    expect(anthropic).toBeLessThanOrEqual(afterSecond);
+  });
+});
+
 describe("markAuthProfileFailure — active windows do not extend on retry", () => {
   // Regression for https://github.com/openclaw/openclaw/issues/23516
   // When all providers are at saturation backoff (30 min) and retries fire every 30 min,
@@ -983,7 +1073,9 @@ describe("markAuthProfileFailure — WHAM-aware Codex cooldowns", () => {
     }
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(store.usageStats?.["anthropic:default"]?.cooldownUntil).toBe(now + 30_000);
+    // calculateAuthProfileCooldownMs is a flat 30 minutes per the
+    // `tune: extend provider cooldown probing` change on deploy/2026.5.6.
+    expect(store.usageStats?.["anthropic:default"]?.cooldownUntil).toBe(now + 30 * 60_000);
   });
 });
 
