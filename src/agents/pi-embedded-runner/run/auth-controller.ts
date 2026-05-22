@@ -395,6 +395,7 @@ export function createEmbeddedRunAuthController(params: {
     const resolvedProfileId = apiKeyInfo.profileId ?? candidate;
     if (!apiKeyInfo.apiKey) {
       if (apiKeyInfo.mode !== "aws-sdk") {
+        await commitProfileSelection(resolvedProfileId);
         const runtimeModel = params.getRuntimeModel();
         throw new Error(formatMissingAuthError(apiKeyInfo, runtimeModel.provider));
       }

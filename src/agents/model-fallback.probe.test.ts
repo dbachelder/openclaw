@@ -585,7 +585,7 @@ describe("runWithModelFallback – probe logic", () => {
     mockedGetSoonestCooldownExpiry.mockReturnValue(almostExpired);
 
     // Simulate a recent probe 10 minutes ago
-    _probeThrottleInternals.lastProbeAttempt.set("openai", NOW - 10 * 60_000);
+    probeThrottleInternals.lastProbeAttempt.set("openai", NOW - 10 * 60_000);
 
     const run = vi.fn().mockResolvedValue("ok");
 
@@ -601,7 +601,7 @@ describe("runWithModelFallback – probe logic", () => {
     mockedGetSoonestCooldownExpiry.mockReturnValue(almostExpired);
 
     // Last probe was 31 minutes ago — should NOT be throttled
-    _probeThrottleInternals.lastProbeAttempt.set("openai", NOW - 31 * 60_000);
+    probeThrottleInternals.lastProbeAttempt.set("openai", NOW - 31 * 60_000);
 
     const run = vi.fn().mockResolvedValue("probed-ok");
 
