@@ -1406,16 +1406,11 @@ export class QmdMemoryManager implements MemorySearchManager {
       if (aggregated.size > 0) {
         searchFallbackReason = "lexical-token-fallback";
         results = Array.from(aggregated.values())
-          .sort(
-            (left, right) =>
-              right.matchCount - left.matchCount ||
-              right.bestScore - left.bestScore ||
-              left.best.path.localeCompare(right.best.path),
-          )
           .map(({ best, matchCount, bestScore }) => ({
             ...best,
             score: Math.min(0.99, bestScore + Math.min(0.2, Math.max(0, matchCount - 1) * 0.05)),
-          }));
+          }))
+          .sort((left, right) => right.score - left.score || left.path.localeCompare(right.path));
       }
     }
     opts?.onDebug?.({
