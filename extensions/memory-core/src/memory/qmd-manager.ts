@@ -79,40 +79,6 @@ const QMD_EMBED_LOCK_RETRY_TEMPLATE = {
   maxTimeout: 10_000,
   randomize: true,
 } as const;
-const QMD_LEXICAL_FALLBACK_MAX_QUERIES = 10;
-const QMD_LEXICAL_FALLBACK_STOP_WORDS = new Set([
-  "about",
-  "after",
-  "again",
-  "and",
-  "any",
-  "are",
-  "before",
-  "but",
-  "can",
-  "could",
-  "for",
-  "from",
-  "has",
-  "have",
-  "how",
-  "into",
-  "not",
-  "our",
-  "show",
-  "that",
-  "the",
-  "their",
-  "there",
-  "this",
-  "was",
-  "what",
-  "when",
-  "where",
-  "which",
-  "with",
-  "would",
-]);
 const MCPORTER_STATE_KEY = Symbol.for("openclaw.mcporterState");
 const QMD_EMBED_QUEUE_KEY = Symbol.for("openclaw.qmdEmbedQueueTail");
 const QMD_UPDATE_QUEUE_KEY = Symbol.for("openclaw.qmdUpdateQueueState");
@@ -1128,59 +1094,6 @@ export class QmdMemoryManager implements MemorySearchManager {
     return true;
   }
 
-  private buildLexicalFallbackQueries(query: string): string[] {
-    const normalized = query.trim();
-    if (!normalized) {
-      return [];
-    }
-    const rawTokens = Array.from(
-      normalized.matchAll(/[\p{L}\p{N}][\p{L}\p{N}_/@.-]*(?:\/[\p{L}\p{N}_/@.-]+)*/gu),
-      (match) => match[0],
-    );
-    const expandedTokens: string[] = [];
-    for (const token of rawTokens) {
-      expandedTokens.push(token);
-      if (token.includes("/")) {
-        expandedTokens.push(...token.split("/").filter(Boolean));
-      }
-    }
-    const usefulTokens = expandedTokens.filter((token, index, tokens) => {
-      const lower = normalizeLowercaseStringOrEmpty(token);
-      if (!lower || QMD_LEXICAL_FALLBACK_STOP_WORDS.has(lower)) {
-        return false;
-      }
-      if (lower.length < 3 && lower !== "dm" && lower !== "us") {
-        return false;
-      }
-      return (
-        tokens.findIndex((candidate) => normalizeLowercaseStringOrEmpty(candidate) === lower) ===
-        index
-      );
-    });
-    const queries: string[] = [];
-    const addQuery = (candidate: string | undefined) => {
-      const value = candidate?.trim();
-      if (!value || value === normalized || queries.includes(value)) {
-        return;
-      }
-      queries.push(value);
-    };
-    for (let index = 0; index < usefulTokens.length - 1; index += 1) {
-      addQuery(`${usefulTokens[index]} ${usefulTokens[index + 1]}`);
-    }
-    for (const token of usefulTokens) {
-      addQuery(token);
-      const lower = normalizeLowercaseStringOrEmpty(token);
-      if (lower.length > 4 && !lower.endsWith("s")) {
-        addQuery(`${token}s`);
-      }
-      if (lower === "favorite" || lower === "favourite") {
-        addQuery("preferred");
-      }
-    }
-    return queries.slice(0, QMD_LEXICAL_FALLBACK_MAX_QUERIES);
-  }
-
   async search(
     query: string,
     opts?: {
@@ -1220,7 +1133,6 @@ export class QmdMemoryManager implements MemorySearchManager {
     const explicitSearchTool = this.qmd.searchTool;
     const mcporterEnabled = this.qmd.mcporter.enabled;
     const runSearchAttempt = async (
-      queryText: string,
       allowMissingCollectionRepair: boolean,
     ): Promise<QmdQueryResult[]> => {
       try {
@@ -1232,7 +1144,7 @@ export class QmdMemoryManager implements MemorySearchManager {
                 tool: explicitSearchTool,
                 searchCommand: qmdSearchCommand,
                 explicitToolOverride: true,
-                query: queryText,
+                query: trimmed,
                 limit,
                 minScore,
                 collectionNames,
@@ -1243,7 +1155,7 @@ export class QmdMemoryManager implements MemorySearchManager {
               tool: explicitSearchTool,
               searchCommand: qmdSearchCommand,
               explicitToolOverride: true,
-              query: queryText,
+              query: trimmed,
               limit,
               minScore,
               collection: collectionNames[0],
@@ -1256,7 +1168,7 @@ export class QmdMemoryManager implements MemorySearchManager {
               tool,
               searchCommand: qmdSearchCommand,
               explicitToolOverride: false,
-              query: queryText,
+              query: trimmed,
               limit,
               minScore,
               collectionNames,
@@ -1267,7 +1179,7 @@ export class QmdMemoryManager implements MemorySearchManager {
             tool,
             searchCommand: qmdSearchCommand,
             explicitToolOverride: false,
-            query: queryText,
+            query: trimmed,
             limit,
             minScore,
             collection: collectionNames[0],
@@ -1277,13 +1189,13 @@ export class QmdMemoryManager implements MemorySearchManager {
         const collectionGroups = await this.resolveCollectionSearchGroups(collectionNames);
         if (collectionGroups.length > 1) {
           return await this.runQueryAcrossCollectionGroups(
-            queryText,
+            trimmed,
             limit,
             collectionGroups,
             qmdSearchCommand,
           );
         }
-        const args = this.buildSearchArgs(qmdSearchCommand, queryText, limit);
+        const args = this.buildSearchArgs(qmdSearchCommand, trimmed, limit);
         args.push(...this.buildCollectionFilterArgs(collectionGroups[0] ?? collectionNames));
         const result = await this.runQmd(args, { timeoutMs: this.qmd.limits.timeoutMs });
         return parseQmdQueryJson(result.stdout, result.stderr);
@@ -1305,13 +1217,13 @@ export class QmdMemoryManager implements MemorySearchManager {
             const collectionGroups = await this.resolveCollectionSearchGroups(collectionNames);
             if (collectionGroups.length > 1) {
               return await this.runQueryAcrossCollectionGroups(
-                queryText,
+                trimmed,
                 limit,
                 collectionGroups,
                 "query",
               );
             }
-            const fallbackArgs = this.buildSearchArgs("query", queryText, limit);
+            const fallbackArgs = this.buildSearchArgs("query", trimmed, limit);
             fallbackArgs.push(
               ...this.buildCollectionFilterArgs(collectionGroups[0] ?? collectionNames),
             );
@@ -1332,86 +1244,38 @@ export class QmdMemoryManager implements MemorySearchManager {
 
     let parsed: QmdQueryResult[];
     try {
-      parsed = await runSearchAttempt(trimmed, true);
+      parsed = await runSearchAttempt(true);
     } catch (err) {
       if (!(await this.tryRepairMissingCollectionSearch(err))) {
         throw err instanceof Error ? err : new Error(String(err));
       }
-      parsed = await runSearchAttempt(trimmed, false);
+      parsed = await runSearchAttempt(false);
     }
-    const resolveResults = async (entries: QmdQueryResult[]): Promise<MemorySearchResult[]> => {
-      const results: MemorySearchResult[] = [];
-      for (const entry of entries) {
-        const docHints = this.normalizeDocHints({
-          preferredCollection: entry.collection,
-          preferredFile: entry.file,
-        });
-        const doc = await this.resolveDocLocation(entry.docid, docHints);
-        if (!doc) {
-          continue;
-        }
-        const snippet = entry.snippet?.slice(0, this.qmd.limits.maxSnippetChars) ?? "";
-        const lines = this.resolveSnippetLines(entry, snippet);
-        const score = typeof entry.score === "number" ? entry.score : 0;
-        const minScore = opts?.minScore ?? 0;
-        if (score < minScore) {
-          continue;
-        }
-        results.push({
-          path: doc.rel,
-          startLine: lines.startLine,
-          endLine: lines.endLine,
-          score,
-          snippet,
-          source: doc.source,
-        });
+    const results: MemorySearchResult[] = [];
+    for (const entry of parsed) {
+      const docHints = this.normalizeDocHints({
+        preferredCollection: entry.collection,
+        preferredFile: entry.file,
+      });
+      const doc = await this.resolveDocLocation(entry.docid, docHints);
+      if (!doc) {
+        continue;
       }
-      return results;
-    };
-
-    let results = await resolveResults(parsed);
-    if (
-      results.length === 0 &&
-      !mcporterEnabled &&
-      qmdSearchCommand === "search" &&
-      opts?.minScore === undefined
-    ) {
-      const fallbackQueries = this.buildLexicalFallbackQueries(trimmed);
-      const aggregated = new Map<
-        string,
-        { best: MemorySearchResult; matchCount: number; bestScore: number }
-      >();
-      for (const fallbackQuery of fallbackQueries) {
-        let fallbackEntries: QmdQueryResult[];
-        try {
-          fallbackEntries = await runSearchAttempt(fallbackQuery, false);
-        } catch (err) {
-          log.warn(`qmd lexical fallback query failed (${fallbackQuery}): ${String(err)}`);
-          continue;
-        }
-        for (const result of await resolveResults(fallbackEntries)) {
-          const key = `${result.source}:${result.path}`;
-          const existing = aggregated.get(key);
-          if (!existing || result.score > existing.bestScore) {
-            aggregated.set(key, {
-              best: result,
-              matchCount: (existing?.matchCount ?? 0) + 1,
-              bestScore: Math.max(result.score, existing?.bestScore ?? 0),
-            });
-          } else {
-            existing.matchCount += 1;
-          }
-        }
+      const snippet = entry.snippet?.slice(0, this.qmd.limits.maxSnippetChars) ?? "";
+      const lines = this.resolveSnippetLines(entry, snippet);
+      const score = typeof entry.score === "number" ? entry.score : 0;
+      const minScore = opts?.minScore ?? 0;
+      if (score < minScore) {
+        continue;
       }
-      if (aggregated.size > 0) {
-        searchFallbackReason = "lexical-token-fallback";
-        results = Array.from(aggregated.values())
-          .map(({ best, matchCount, bestScore }) => ({
-            ...best,
-            score: Math.min(0.99, bestScore + Math.min(0.2, Math.max(0, matchCount - 1) * 0.05)),
-          }))
-          .sort((left, right) => right.score - left.score || left.path.localeCompare(right.path));
-      }
+      results.push({
+        path: doc.rel,
+        startLine: lines.startLine,
+        endLine: lines.endLine,
+        score,
+        snippet,
+        source: doc.source,
+      });
     }
     opts?.onDebug?.({
       backend: "qmd",
