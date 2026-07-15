@@ -7,7 +7,7 @@
 # build layer is not invalidated by unrelated source changes.
 #
 # Build stages use full bookworm; the runtime image is always bookworm-slim.
-ARG OPENCLAW_EXTENSIONS="slack,openai,amazon-bedrock,anthropic,active-memory,memory-core,zai"
+ARG OPENCLAW_EXTENSIONS="slack,openai,amazon-bedrock,anthropic,active-memory,memory-core,zai,firecrawl"
 ARG OPENCLAW_BUNDLED_PLUGIN_DIR=extensions
 ARG OPENCLAW_DOCKER_BUILD_NODE_OPTIONS="--max-old-space-size=8192"
 ARG OPENCLAW_DOCKER_BUILD_TSDOWN_MAX_OLD_SPACE_MB=""
