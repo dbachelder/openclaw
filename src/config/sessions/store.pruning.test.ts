@@ -9,7 +9,6 @@ import {
 } from "./store-maintenance-preserve.js";
 import {
   isGatewayModelRunSessionKey,
-  isProtectedSessionMaintenanceEntry,
   resolveMaintenanceConfigFromInput,
   resolveQuotaSuspensionEntryMaintenance,
   resolveSessionEntryMaintenanceHighWater,
@@ -63,7 +62,7 @@ describe("pruneStaleEntries", () => {
     expect(store).toHaveProperty("fresh");
   });
 
-  it("preserves durable external conversation entries", () => {
+  it("prunes stale external conversation entries", () => {
     const now = Date.now();
     const store = makeStore([
       ["old", makeEntry(now - 31 * DAY_MS)],
@@ -76,13 +75,13 @@ describe("pruneStaleEntries", () => {
 
     const pruned = pruneStaleEntries(store, 30 * DAY_MS);
 
-    expect(pruned).toBe(1);
+    expect(pruned).toBe(6);
     expect(store.old).toBeUndefined();
-    expect(store).toHaveProperty("agent:main:slack:channel:C123:thread:1710000000.000100");
-    expect(store).toHaveProperty("agent:main:telegram:group:-100123:topic:77");
-    expect(store).toHaveProperty("agent:main:slack:channel:C999");
-    expect(store).toHaveProperty("agent:main:telegram:group:-100123");
-    expect(store).toHaveProperty("agent:main:discord:channel:ops");
+    expect(store).not.toHaveProperty("agent:main:slack:channel:C123:thread:1710000000.000100");
+    expect(store).not.toHaveProperty("agent:main:telegram:group:-100123:topic:77");
+    expect(store).not.toHaveProperty("agent:main:slack:channel:C999");
+    expect(store).not.toHaveProperty("agent:main:telegram:group:-100123");
+    expect(store).not.toHaveProperty("agent:main:discord:channel:ops");
   });
 });
 
@@ -404,26 +403,42 @@ describe("capEntryCount", () => {
     expect(store.old).toBeUndefined();
   });
 
-  it("preserves durable external conversation entries when capping", () => {
+  it("bounds external conversation entries and retains a newer cron session", () => {
     const now = Date.now();
-    const threadKey = "agent:main:discord:channel:123456:thread:987654";
+    const oldestThreadKey = "agent:main:slack:channel:C123:thread:1710000000.000100";
+    const recentThreadKey = "agent:main:slack:channel:C123:thread:1710000000.000200";
+    const cronKey = "agent:main:cron:job:run:123";
     const store = makeStore([
-      [threadKey, makeEntry(now - 5 * DAY_MS)],
-      ["oldest", makeEntry(now - 4 * DAY_MS)],
-      ["old", makeEntry(now - 3 * DAY_MS)],
-      ["recent", makeEntry(now - DAY_MS)],
-      ["newest", makeEntry(now)],
+      [oldestThreadKey, makeEntry(now - 5 * DAY_MS)],
+      [recentThreadKey, makeEntry(now - DAY_MS)],
+      [cronKey, makeEntry(now)],
     ]);
 
-    const evicted = capEntryCount(store, 3);
+    const evicted = capEntryCount(store, 2);
 
-    expect(evicted).toBe(2);
-    expect(Object.keys(store)).toHaveLength(3);
-    expect(store).toHaveProperty(threadKey);
-    expect(store).toHaveProperty("newest");
-    expect(store).toHaveProperty("recent");
-    expect(store.oldest).toBeUndefined();
-    expect(store.old).toBeUndefined();
+    expect(evicted).toBe(1);
+    expect(Object.keys(store)).toHaveLength(2);
+    expect(store).toHaveProperty(cronKey);
+    expect(store).toHaveProperty(recentThreadKey);
+    expect(store).not.toHaveProperty(oldestThreadKey);
+  });
+
+  it("recovers an overfilled Slack store without deleting a newly created cron session", () => {
+    const now = Date.now();
+    const slackEntries = Array.from({ length: 742 }, (_, index) => {
+      const key = `agent:main:slack:channel:C123:thread:${index}`;
+      return [key, makeEntry(now - index - 1)] as [string, SessionEntry];
+    });
+    const cronKey = "agent:main:cron:job:run:new";
+    const store = makeStore([...slackEntries, [cronKey, makeEntry(now)]]);
+
+    const evicted = capEntryCount(store, 500);
+
+    expect(evicted).toBe(243);
+    expect(Object.keys(store)).toHaveLength(500);
+    expect(store).toHaveProperty(cronKey);
+    expect(store).toHaveProperty("agent:main:slack:channel:C123:thread:0");
+    expect(store).not.toHaveProperty("agent:main:slack:channel:C123:thread:741");
   });
 
   it("preserves runtime-provided pending subagent sessions when capping", () => {
@@ -500,65 +515,6 @@ describe("capEntryCount", () => {
     } finally {
       unregister();
     }
-  });
-});
-
-describe("isProtectedSessionMaintenanceEntry", () => {
-  it("treats generated ACP bridge sessions as disposable", () => {
-    expect(
-      isProtectedSessionMaintenanceEntry("agent:main:acp-bridge:session-1", {
-        ...makeEntry(Date.now()),
-        chatType: "group",
-      }),
-    ).toBe(false);
-  });
-
-  it("does not protect synthetic sessions just because they carry group metadata", () => {
-    expect(
-      isProtectedSessionMaintenanceEntry("agent:main:subagent:worker", {
-        ...makeEntry(Date.now()),
-        chatType: "group",
-      }),
-    ).toBe(false);
-    expect(
-      isProtectedSessionMaintenanceEntry("agent:main:cron:job:run:123", {
-        ...makeEntry(Date.now()),
-        origin: { chatType: "group" },
-      }),
-    ).toBe(false);
-  });
-
-  it("protects metadata-less Telegram topic keys without treating every :topic: id as a thread", () => {
-    expect(
-      isProtectedSessionMaintenanceEntry(
-        "agent:main:telegram:group:-100123:topic:77",
-        makeEntry(Date.now()),
-      ),
-    ).toBe(true);
-    expect(
-      isProtectedSessionMaintenanceEntry(
-        "agent:main:opaque:topic:om_topic_root:sender:ou_topic_user",
-        makeEntry(Date.now()),
-      ),
-    ).toBe(false);
-  });
-
-  it("protects metadata-less channel session keys and channel chat metadata", () => {
-    expect(
-      isProtectedSessionMaintenanceEntry("agent:main:slack:channel:C123", makeEntry(Date.now())),
-    ).toBe(true);
-    expect(
-      isProtectedSessionMaintenanceEntry(
-        "agent:main:custom:channel:room-one:with:colon",
-        makeEntry(Date.now()),
-      ),
-    ).toBe(true);
-    expect(
-      isProtectedSessionMaintenanceEntry("agent:main:opaque", {
-        ...makeEntry(Date.now()),
-        chatType: "channel",
-      }),
-    ).toBe(true);
   });
 });
 

@@ -50,6 +50,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- **Session maintenance bounds:** keep actively executing sessions safe while allowing inactive channel and thread sessions to age out, restoring the configured hard cap and preventing over-cap conversation stores from deleting newly created cron sessions.
 - **Codex runtime switching:** accept the bundled Codex runtime for both `codex/*` and `openai/*` model routes while keeping unsupported provider/runtime pairs rejected. (#103762)
 - **LM Studio and xAI repaired tool calls:** emit the terminal tool-call event before completion when promoting serialized plain-text tool calls, preserving the complete streaming lifecycle for consumers.
 - **Browser actions on Node 24:** keep browser request cancellation bound to the client and response lifetime instead of Node 24.16+'s prematurely aborted body-stream signal, preventing valid POST actions from failing after JSON parsing. Thanks @obviyus and @vincentkoc.

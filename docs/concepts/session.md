@@ -158,9 +158,10 @@ maintenance/cap pressure is reached, and runs before the broader stale-entry
 age cutoff and entry cap. Normal direct, group, thread, cron, hook, heartbeat,
 ACP, and sub-agent sessions do not inherit this 24h retention.
 
-Maintenance preserves durable external conversation pointers, including group
-sessions and thread-scoped chat sessions, while still allowing synthetic cron,
-hook, heartbeat, ACP, and sub-agent entries to age out.
+Maintenance preserves sessions that are actively executing. Inactive external
+conversation pointers, including group and thread-scoped chat sessions, follow
+the same age and entry-count limits as synthetic sessions. This keeps the store
+bounded while retaining the most recently used conversation context.
 
 If you previously used DM isolation and later returned `session.dmScope` to
 `main`, preview stale peer-keyed DM rows with

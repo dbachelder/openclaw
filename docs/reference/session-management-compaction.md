@@ -28,7 +28,7 @@ Per agent, on the Gateway host (resolved via `src/config/sessions.ts`):
 
 ## Store maintenance and disk controls
 
-`session.maintenance` controls automatic maintenance for `sessions.json`, transcript artifacts, and trajectory sidecars:
+`session.maintenance` controls automatic maintenance for `sessions.json`, transcript artifacts, and trajectory sidecars. Active runtime-owned sessions are preserved, while inactive channel and thread sessions obey the configured age and count bounds:
 
 | Key                     | Default               | Notes                                                                             |
 | ----------------------- | --------------------- | --------------------------------------------------------------------------------- |
@@ -56,7 +56,7 @@ openclaw sessions cleanup --dry-run
 openclaw sessions cleanup --enforce
 ```
 
-Maintenance keeps durable external conversation pointers such as group sessions and thread-scoped chat sessions, but synthetic runtime entries (cron, hooks, heartbeat, ACP, sub-agents) can still be removed once they exceed the configured age, count, or disk budget. Isolated cron runs use a separate `cron.sessionRetention` control, independent of model-run probe retention.
+Maintenance preserves active runtime-owned sessions. Inactive group and thread-scoped chat sessions can be removed once they exceed the configured age, count, or disk budget, just like synthetic runtime entries (cron, hooks, heartbeat, ACP, sub-agents). Isolated cron runs use a separate `cron.sessionRetention` control, independent of model-run probe retention.
 
 Normal Gateway writes flow through a per-store session writer that serializes in-process mutations without taking a runtime file lock. Hot-path patch helpers borrow the validated mutable cache while holding that writer slot, so large `sessions.json` files are not cloned or reread for every metadata update. Prefer `updateSessionStore(...)` / `updateSessionStoreEntry(...)` in runtime code; direct whole-store saves are for compatibility and offline maintenance tools. When a Gateway is reachable, non-dry-run `openclaw sessions cleanup` and `openclaw agents delete` delegate store mutations to the Gateway so cleanup joins the same writer queue; `--store <path>` is the explicit offline repair path for direct file maintenance and always stays local (as does `--dry-run`). `maxEntries` cleanup is batched for production-sized stores, so a store may briefly exceed the configured cap before the next high-water cleanup rewrites it down. Reads never prune or cap entries during Gateway startup - only writes or `openclaw sessions cleanup --enforce` do, and the latter also applies the cap immediately and prunes old unreferenced transcript, checkpoint, and trajectory artifacts even with no disk budget configured.
 

@@ -6,14 +6,8 @@ import {
 import { parseByteSize } from "../../cli/parse-bytes.js";
 import { parseDurationMs } from "../../cli/parse-duration.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
-import {
-  isAcpSessionKey,
-  isCronSessionKey,
-  isSubagentSessionKey,
-  parseAgentSessionKey,
-} from "../../sessions/session-key-utils.js";
+import { parseAgentSessionKey } from "../../sessions/session-key-utils.js";
 import type { SessionMaintenanceConfig, SessionMaintenanceMode } from "../types.base.js";
-import { parseSessionThreadInfoFast } from "./thread-info.js";
 import type { SessionEntry } from "./types.js";
 
 const log = createSubsystemLogger("sessions/store");
@@ -353,65 +347,12 @@ function getEntryUpdatedAt(entry?: SessionEntry): number {
   return entry?.updatedAt ?? Number.NEGATIVE_INFINITY;
 }
 
-function isSyntheticSessionMaintenanceKey(sessionKey: string): boolean {
-  const parsed = parseAgentSessionKey(sessionKey);
-  const rest = normalizeLowercaseStringOrEmpty(parsed?.rest ?? sessionKey);
-  // ACP bridge sessions use normal model dispatch, but remain synthetic and disposable.
-  return (
-    isSubagentSessionKey(sessionKey) ||
-    isAcpSessionKey(sessionKey) ||
-    isCronSessionKey(sessionKey) ||
-    rest.startsWith("acp-bridge:") ||
-    rest.startsWith("hook:") ||
-    rest.startsWith("node:") ||
-    rest === "heartbeat" ||
-    rest.endsWith(":heartbeat") ||
-    rest.includes(":heartbeat:")
-  );
-}
-
-function isTelegramTopicSessionKey(sessionKey: string): boolean {
-  const parsed = parseAgentSessionKey(sessionKey);
-  const rest = normalizeLowercaseStringOrEmpty(parsed?.rest ?? sessionKey);
-  return /^telegram:(?:group|channel|direct|dm):.+:topic:[^:]+$/.test(rest);
-}
-
-function isExternalGroupOrChannelSessionKey(sessionKey: string): boolean {
-  const parsed = parseAgentSessionKey(sessionKey);
-  const rest = normalizeLowercaseStringOrEmpty(parsed?.rest ?? sessionKey);
-  return /^[^:]+:(?:group|channel):.+$/.test(rest);
-}
-
-export function isProtectedSessionMaintenanceEntry(
-  sessionKey: string,
-  entry: SessionEntry | undefined,
-): boolean {
-  // Human conversation surfaces are protected; synthetic automation sessions are disposable.
-  if (isSyntheticSessionMaintenanceKey(sessionKey)) {
-    return false;
-  }
-  if (parseSessionThreadInfoFast(sessionKey).threadId) {
-    return true;
-  }
-  if (isTelegramTopicSessionKey(sessionKey)) {
-    return true;
-  }
-  if (isExternalGroupOrChannelSessionKey(sessionKey)) {
-    return true;
-  }
-  const chatType = normalizeLowercaseStringOrEmpty(entry?.chatType ?? entry?.origin?.chatType);
-  return chatType === "group" || chatType === "channel" || chatType === "thread";
-}
-
 export function shouldPreserveMaintenanceEntry(params: {
   key: string;
   entry: SessionEntry | undefined;
   preserveKeys?: ReadonlySet<string>;
 }): boolean {
-  return (
-    params.preserveKeys?.has(params.key) === true ||
-    isProtectedSessionMaintenanceEntry(params.key, params.entry)
-  );
+  return params.preserveKeys?.has(params.key) === true;
 }
 
 export function getActiveSessionMaintenanceWarning(params: {
@@ -427,9 +368,6 @@ export function getActiveSessionMaintenanceWarning(params: {
   }
   const activeEntry = params.store[activeSessionKey];
   if (!activeEntry) {
-    return null;
-  }
-  if (isProtectedSessionMaintenanceEntry(activeSessionKey, activeEntry)) {
     return null;
   }
   const now = params.nowMs ?? Date.now();
@@ -473,16 +411,6 @@ function wouldCapActiveSession(params: {
     return true;
   }
 
-  const protectedCount = params.keys.filter(
-    (key) =>
-      key !== params.activeSessionKey && isProtectedSessionMaintenanceEntry(key, params.store[key]),
-  ).length;
-  const maxRemovableEntries = Math.max(0, params.maxEntries - protectedCount);
-  // If protected entries fill the cap, the active unprotected session would be the one removed.
-  if (maxRemovableEntries <= 0) {
-    return true;
-  }
-
   const activeUpdatedAt = getEntryUpdatedAt(params.activeEntry);
   let newerOrTieBeforeActive = 0;
   let seenActive = false;
@@ -491,13 +419,10 @@ function wouldCapActiveSession(params: {
       seenActive = true;
       continue;
     }
-    if (isProtectedSessionMaintenanceEntry(key, params.store[key])) {
-      continue;
-    }
     const entryUpdatedAt = getEntryUpdatedAt(params.store[key]);
     if (entryUpdatedAt > activeUpdatedAt || (!seenActive && entryUpdatedAt === activeUpdatedAt)) {
       newerOrTieBeforeActive++;
-      if (newerOrTieBeforeActive >= maxRemovableEntries) {
+      if (newerOrTieBeforeActive >= params.maxEntries) {
         return true;
       }
     }
@@ -525,7 +450,6 @@ export function capEntryCount(
     shouldPreserveMaintenanceEntry({ key, entry, preserveKeys: opts.preserveKeys }),
   ).length;
   const maxRemovableEntries = Math.max(0, maxEntries - preservedCount);
-  // Protected entries reduce the removable budget instead of being counted as deletion targets.
   const keys = Object.keys(store).filter(
     (key) =>
       !shouldPreserveMaintenanceEntry({

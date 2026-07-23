@@ -526,15 +526,15 @@ describe("enforceSessionDiskBudget", () => {
     });
   });
 
-  it("does not evict protected thread session entries under store pressure", async () => {
+  it("evicts inactive thread sessions while preserving the active session", async () => {
     await withTempDir({ prefix: "openclaw-disk-budget-" }, async (dir) => {
       const storePath = path.join(dir, "sessions.json");
-      const protectedKey = "agent:main:slack:channel:C123:thread:1710000000.000100";
+      const inactiveThreadKey = "agent:main:slack:channel:C123:thread:1710000000.000100";
       const removableKey = "agent:main:subagent:old-worker";
       const activeKey = "agent:main:main";
       const store: Record<string, SessionEntry> = {
-        [protectedKey]: {
-          sessionId: "protected-thread",
+        [inactiveThreadKey]: {
+          sessionId: "inactive-thread",
           updatedAt: 1,
           displayName: "p".repeat(2000),
         },
@@ -561,11 +561,11 @@ describe("enforceSessionDiskBudget", () => {
         warnOnly: false,
       });
 
-      expect(store).toHaveProperty(protectedKey);
+      expect(store[inactiveThreadKey]).toBeUndefined();
       expect(store[removableKey]).toBeUndefined();
       expect(store).toHaveProperty(activeKey);
       expectBudgetResult(result);
-      expect(result.removedEntries).toBe(1);
+      expect(result.removedEntries).toBe(2);
     });
   });
 });
